@@ -1,0 +1,57 @@
+#Implement Cloud Security Fundamentals on Google Cloud: Challenge Lab
+#GSP342
+
+#Initial Steps
+
+gcloud config set compute/zone $YOUR_ZONE
+gcloud config set compute/region $YOUR_REGION
+
+#Create a Role Definition
+
+cat > role-definition.yaml <<EOF_END
+title: $CUSTOM_SECURIY_ROLE
+description: Permissions
+stage: ALPHA
+includedPermissions:
+- storage.buckets.get
+- storage.objects.get
+- storage.objects.list
+- storage.objects.update
+- storage.objects.create
+EOF_END
+
+#Create the Custom Security Role
+
+gcloud iam roles create $CUSTOM_SECURIY_ROLE --project $PROJECT_ID --file role-definition.yaml
+
+#Bind IAM Policy Roles
+    ~the service account email can be copied and pasted from the IAM page in console~
+
+gcloud projects add-iam-policy-binding $PROJECT_ID --member serviceAccount:$SERVICE_ACCOUNT@$DEVSHELL_PROJECT_ID.iam.gserviceaccount.com --role roles/monitoring.viewer
+
+gcloud projects add-iam-policy-binding $PROJECT_ID --member serviceAccount:$SERVICE_ACCOUNT@$DEVSHELL_PROJECT_ID.iam.gserviceaccount.com --role roles/monitoring.metricWriter
+
+gcloud projects add-iam-policy-binding $PROJECT_ID --member serviceAccount:$SERVICE_ACCOUNT@$DEVSHELL_PROJECT_ID.iam.gserviceaccount.com --role roles/logging.logWriter
+
+#Create the GKE Cluster
+
+gcloud container clusters create $YOUR_CLUSTER_NAME --num-nodes 1 --master-ipv4-cidr=172.16.0.64/28 --network orca-build-vpc --subnetwork orca-build-subnet --enable-master-authorized-networks 192.168.10.2/32 --enable-ip-alias --enable-private-nodes --enable-private-endpoint --service-account $YOUR_SERVICE_ACCOUNT@DEVSHELL_PROJECT_ID.iam.gserviceaccount.com --zone $YOUR_ZONE
+
+      ~This covers the requirements in Task 4: cluster name, deploying the cluster to the orca-build-subnet, configuring the cluster to use the Service Account, and enabling the private cluster options.
+
+#Deploy an application to a private Kubernetes Engine cluster
+
+gcloud compute ssh orca-jumphost --zone $YOUR_ZONE --project $PROJECT_ID
+
+      ~Type "Y" when prompted with "Do you want to continue?" in the SSH window
+
+sudo apt-get install google-cloud-sdk-gke-gcloud-auth-plugin
+echo "export USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> ~/.bashrc
+source ~/.bashrc
+gcloud container clusters get-credentials <your cluster name> --internal-ip --project=<project ID> --zone <cluster zone>
+     
+      ~Installs gke-cloud-auth-plugin which is needed to continue using kubectl
+
+kubectl create deployment hello-server --image=gcr.io/google-samples/hello-app:1.0 && kubectl expose deployment hello-server --name orca-hello-service --type LoadBalancer --port 80 --target-port 8080
+
+      ~This deploys an application that listens on port 8080 that can be exposed using a basic load balancer service for testing
