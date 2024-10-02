@@ -1,0 +1,96 @@
+#Implement Load Balancing on Compute Engine: Challenge Lab
+#GSP313
+
+#Initial Set Up
+
+gcloud config set compute/region $YOUR_REGION
+gcloud config set compute/zone $YOUR_ZONE
+
+#Install nginx
+
+cat << EOF > startup.sh
+#! /bin/bash
+apt-get update
+apt-get install -y nginx
+service nginx start
+sed -i -- 's/nginx/Google Cloud Platform - '"\$HOSTNAME"'/' /var/www/html/index.nginx-debian.html
+EOF
+
+#Create a project jumpshot instance
+
+gcloud compute instance-templates create nginx-template \
+--network=default \
+--subnet=default \
+--machine-type=e2-medium \
+ --metadata-from-file startup-script=startup.sh \
+ --image-family=debian-11 \
+ --image-project=debian-cloud \
+ --tags=http-server
+
+#Create target pool 
+
+gcloud compute target-pools create nginx-pool \
+--region=$YOUR_ZONE
+
+#Create managed instance group
+
+gcloud compute instance-groups managed create nginx-group \
+   --template=nginx-template --size=2 --zone=$YOUR_ZONE
+
+#Set named port
+
+gcloud compute instance-groups managed set-named-ports nginx-group --named-ports http:80 --zone=$YOUR_ZONE
+
+#Create firewall rule
+
+gcloud compute firewall-rules create grant-tcp-rule-872 \
+  --network=default \
+  --action=allow \
+  --direction=ingress \
+  --source-ranges=130.211.0.0/22,35.191.0.0/16 \
+  --target-tags=http-server \
+  --rules=tcp:80 
+
+#Reserve an IP address
+
+gcloud compute addresses create lb-ipv4-1 \
+  --ip-version=IPV4 \
+  --global
+
+#Create a health check
+
+gcloud compute health-checks create http http-basic-check \
+  --port 80
+
+#Create the backend service
+
+gcloud compute backend-services create nginx-backend \
+  --protocol=HTTP \
+  --port-name=http \
+  --health-checks=http-basic-check \
+  --global
+
+#Add backend to the backend service
+
+gcloud compute backend-services add-backend nginx-backend \
+  --instance-group=nginx-group \
+  --instance-group-zone=$YOU_ZONE \
+  --global
+
+#Create the URL map
+
+gcloud compute url-maps create web-map-http \
+  --default-service nginx-backend
+
+#Create the target HTTP proxies
+
+gcloud compute target-http-proxies create http-lb-proxy \
+    --url-map web-map-http
+
+#Create forwarding rules
+
+gcloud compute forwarding-rules create http-content-rule \
+   --address=lb-ipv4-1 \
+   --global \
+   --target-http-proxy=http-lb-proxy \
+   --ports=80
